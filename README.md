@@ -62,3 +62,9 @@ public/            前端（纯静态，可直接托管）
 server.js          可选：静态服务 + Claude API 代理（隐藏 API Key、访问密码）
 .github/workflows/pages.yml   GitHub Pages 自动部署
 ```
+
+## 会员版（在 Claude App 里使用，不需要 API Key）
+
+`claude-app/interpreter.html` 是发布在 claude.ai 上的 Artifact 版本：使用 Claude 会员额度翻译，
+通过 iPhone 键盘听写或「语音控制」输入英文（claude.ai 页面内无法直接使用麦克风），
+每约 12 秒翻译一次，会议记录保存在账号下的私有存储中，结束后可生成中文总结。

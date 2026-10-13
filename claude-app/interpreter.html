@@ -1,0 +1,539 @@
+<title>英中同传</title>
+<style>
+/* Layout: one-column phone tool. Live view keeps the dictation box at the top and
+   the newest translation directly under it, so the keyboard never hides them. */
+:root {
+  --bg: #f3f5f7;
+  --surface: #ffffff;
+  --fg: #141c24;
+  --muted: #5a6875;
+  --line: #dbe1e6;
+  --accent: #1d5fd1;
+  --on-accent: #ffffff;
+  --ok: #1a7f4b;
+  --bad: #c0362c;
+  --wait: #8a6d10;
+  --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1418; --surface: #182027; --fg: #e5ebf0; --muted: #93a1ad; --line: #2a343d;
+  --accent: #5b93f0; --on-accent: #0b1220; --ok: #45c07f; --bad: #f0776c; --wait: #d9b54a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f1418; --surface: #182027; --fg: #e5ebf0; --muted: #93a1ad; --line: #2a343d;
+  --accent: #5b93f0; --on-accent: #0b1220; --ok: #45c07f; --bad: #f0776c; --wait: #d9b54a; color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font: 16px/1.55 var(--font); padding-inline: 16px; padding-block: 0 32px; }
+.view { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+.stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+[hidden] { display: none !important; }
+button { font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+button.danger { color: var(--bad); border-color: var(--bad); }
+button.link { border: none; background: none; color: var(--accent); padding: 4px 0; }
+button:disabled { opacity: .55; }
+button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 2; background: var(--bg); display: flex; align-items: center; gap: 10px; padding-block: 12px 8px; }
+.bar h1 { font-size: 22px; margin: 0; flex: 1; }
+.bar .grow { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip { font-size: 13px; padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; color: var(--muted); }
+.chip.ok { color: var(--ok); } .chip.bad { color: var(--bad); } .chip.wait { color: var(--wait); }
+
+.note { margin: 0; font-size: 14px; color: var(--wait); border: 1px solid var(--wait); border-radius: 8px; padding: 8px 10px; }
+.empty { color: var(--muted); font-size: 15px; display: flex; flex-direction: column; gap: 6px; }
+.empty p { margin: 0; }
+
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.list button { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; }
+.list .t { font-weight: 600; }
+.list .s { color: var(--muted); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+
+details.help { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; font-size: 15px; }
+details.help summary { cursor: pointer; font-weight: 600; }
+details.help ol { padding-left: 20px; margin: 8px 0; }
+details.help p { margin: 6px 0; color: var(--muted); }
+
+textarea { font: inherit; font-size: 15px; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; width: 100%; height: 5.2em; resize: none; }
+.stall { color: var(--wait); font-size: 14px; font-weight: 600; }
+
+.pairs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.pair { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pair .meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pair .en { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.pair .zh { font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
+.pair .zh.wait { color: var(--muted); font-weight: 400; font-size: 15px; }
+.pair .zh.err { color: var(--bad); font-weight: 400; font-size: 14px; }
+
+.title h2 { margin: 0; font-size: 20px; text-wrap: balance; }
+.title p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+.tabs { display: flex; gap: 6px; }
+.tabs button { border-radius: 999px; padding: 6px 14px; }
+.tabs button.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.md { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 4px 16px; overflow-wrap: anywhere; }
+.md h2, .md h3, .md h4 { font-size: 17px; margin: 14px 0 6px; }
+.md ul, .md ol { padding-left: 20px; margin: 6px 0; }
+.md p { margin: 8px 0; }
+.md .hint { color: var(--muted); }
+.progress { color: var(--muted); font-size: 14px; margin: 0; }
+</style>
+
+<!-- Home: meeting history -->
+<section id="home" class="view">
+  <header class="bar">
+    <h1>英中同传</h1>
+    <button id="newBtn" type="button" class="primary">新会议</button>
+  </header>
+  <p id="storeNote" class="note" hidden></p>
+  <ul id="list" class="list"></ul>
+  <div id="emptyList" class="empty">
+    <p>还没有会议记录。</p>
+    <p>点「新会议」，再点文本框开始听写英文，页面每约 12 秒把新内容翻译成中文；结束后可一键生成中文总结，所有会议都会保存在这里。</p>
+  </div>
+  <details class="help" id="help">
+    <summary>免按键持续听写（语音控制）设置</summary>
+    <ol>
+      <li>设置 → 辅助功能 → 语音控制 → 语言选 <b>English (U.S.)</b>。</li>
+      <li>打开「语音控制」，顶部出现蓝色麦克风图标即在听。</li>
+      <li>设置 → 辅助功能 → 辅助功能快捷键 勾选「语音控制」，之后连按三下侧边按钮即可开关。</li>
+    </ol>
+    <p>开启后点一下会议页的文本框，无需再按键盘 🎙。语音控制可能把 "tap…"、"scroll up" 等当成命令；可先说 "Dictation mode" 切到纯听写。用完记得关闭。</p>
+    <p>也可以直接用键盘 🎙 听写，停了页面会提示你再点一次。</p>
+  </details>
+</section>
+
+<!-- Live meeting -->
+<section id="live" class="view" hidden>
+  <header class="bar">
+    <button id="endBtn" type="button" class="primary">结束</button>
+    <span id="liveTitle" class="grow"></span>
+    <span id="liveState" class="chip wait">等待听写</span>
+  </header>
+  <textarea id="dict" placeholder="点这里，然后按键盘 🎙 听写英文（或开启语音控制）…" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+  <div id="stall" class="stall" hidden>听写好像停了：如在用键盘听写，点键盘上的 🎙 继续。</div>
+  <p id="liveNote" class="note" hidden></p>
+  <ol id="liveList" class="pairs"></ol>
+</section>
+
+<!-- Meeting detail -->
+<section id="meeting" class="view" hidden>
+  <header class="bar">
+    <button id="backBtn" type="button">‹ 会议列表</button>
+    <span class="grow"></span>
+    <button id="contBtn" type="button">继续记录</button>
+  </header>
+  <div class="title"><h2 id="mTitle"></h2><p id="mMeta"></p></div>
+  <div class="tabs" role="tablist">
+    <button type="button" data-tab="sum" class="on">总结</button>
+    <button type="button" data-tab="text">原文与译文</button>
+  </div>
+  <div id="tabSum" class="stack">
+    <div class="row"><button id="sumBtn" type="button" class="primary">生成中文总结</button><span id="sumProg" class="progress"></span></div>
+    <article id="sumOut" class="md"></article>
+  </div>
+  <div id="tabText" class="stack" hidden>
+    <div class="row"><button id="copyBtn" type="button">复制全文</button><span id="copyMsg" class="progress"></span></div>
+    <textarea id="copyArea" hidden readonly></textarea>
+    <ol id="mList" class="pairs"></ol>
+  </div>
+  <div class="row">
+    <button id="delBtn" type="button" class="danger">删除这场会议</button>
+    <span id="delConfirm" class="row" hidden>确定删除？<button id="delYes" type="button" class="danger">删除</button><button id="delNo" type="button">取消</button></span>
+  </div>
+</section>
+
+<script>
+(() => {
+const $ = (id) => document.getElementById(id);
+const PAGE = 50;          // items per stored page document
+const TICK_MS = 12000;    // translation rhythm
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const bytes = (s) => new TextEncoder().encode(s).length;
+const fmtTime = (t) => new Date(t).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const fmtDate = (t) => new Date(t).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+const errText = (e) => (e && (e.code || e.message)) ? `${e.code || ""} ${e.message || ""}`.trim() : String(e);
+
+// ---------- Platform ----------
+let sample = null, db = null, uid = null;
+const ready = (async () => {
+  if (!window.claude) return;
+  const [s, d, u] = await Promise.all([claude.use("sample"), claude.use("db"), claude.use("user")]);
+  sample = s;
+  uid = u ? await u.id() : null;
+  db = uid ? d : null;
+})();
+
+// ---------- Storage: private per-user db, else this browser only ----------
+const local = {
+  get(k, f) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : f; } catch { return f; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* unavailable */ } },
+  del(k) { try { localStorage.removeItem(k); } catch { /* unavailable */ } },
+};
+const meetingRef = (id) => db.collection(`data/users/${uid}`).doc(id);
+const pageRef = (id, n) => meetingRef(id).collection("pages").doc("p" + String(n).padStart(4, "0"));
+
+let chain = Promise.resolve();
+function queueWrite(fn) {
+  chain = chain.then(fn).catch((e) => {
+    const msg = e && e.code === "quota_exceeded" ? "存储空间已满，请删除一些旧会议。" : "保存失败：" + errText(e);
+    showNote(msg);
+  });
+  return chain;
+}
+
+const store = {
+  async list() {
+    if (db) {
+      const snap = await db.collection(`data/users/${uid}`).orderBy("startedAt", "desc").limit(500).get();
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    }
+    return Object.values(local.get("si.meetings", {})).sort((a, b) => b.startedAt - a.startedAt);
+  },
+  saveMeta(m) {
+    const body = { title: m.title, startedAt: m.startedAt, updatedAt: Date.now(), count: m.count, preview: m.preview || "", summary: m.summary || "", summaryAt: m.summaryAt || 0 };
+    return queueWrite(async () => {
+      if (db) return meetingRef(m.id).set(body);
+      const all = local.get("si.meetings", {}); all[m.id] = { id: m.id, ...body }; local.set("si.meetings", all);
+    });
+  },
+  savePage(m, n, items) {
+    const body = { items: items.slice(n * PAGE, (n + 1) * PAGE).map(({ t, en, zh, st }) => ({ t, en, zh: zh || "", st })) };
+    return queueWrite(async () => {
+      if (db) return pageRef(m.id, n).set(body);
+      local.set(`si.items.${m.id}`, items.map(({ t, en, zh, st }) => ({ t, en, zh: zh || "", st })));
+    });
+  },
+  async loadItems(m) {
+    if (db) {
+      const snap = await meetingRef(m.id).collection("pages").limit(1000).get();
+      return snap.docs.flatMap((d) => d.data().items || []);
+    }
+    return local.get(`si.items.${m.id}`, []);
+  },
+  async remove(m) {
+    await chain;
+    if (db) {
+      const pages = Math.ceil((m.count || 0) / PAGE) + 1;
+      for (let n = 0; n < pages; n++) await pageRef(m.id, n).delete();
+      return meetingRef(m.id).delete();
+    }
+    const all = local.get("si.meetings", {}); delete all[m.id]; local.set("si.meetings", all);
+    local.del(`si.items.${m.id}`);
+  },
+};
+
+function showNote(msg) {
+  for (const id of ["storeNote", "liveNote"]) { $(id).textContent = msg; $(id).hidden = !msg; }
+}
+
+// ---------- Views ----------
+function show(view) {
+  for (const v of ["home", "live", "meeting"]) $(v).hidden = v !== view;
+  window.scrollTo(0, 0);
+}
+
+async function renderHome() {
+  show("home");
+  await ready;
+  if (!sample) showNote("需要在 claude.ai 或 Claude App 中打开此页面才能翻译。");
+  else if (!db) showNote("云端存储不可用，记录仅保存在本设备浏览器中，可能丢失。");
+  let meetings = [];
+  try { meetings = await store.list(); } catch (e) { showNote("读取会议列表失败：" + errText(e)); }
+  const list = $("list");
+  list.replaceChildren();
+  $("emptyList").hidden = meetings.length > 0;
+  $("help").open = meetings.length === 0;
+  for (const m of meetings) {
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.type = "button";
+    const t = document.createElement("span"); t.className = "t"; t.textContent = m.title;
+    const s = document.createElement("span"); s.className = "s";
+    s.textContent = `${m.count || 0} 段 · ${m.summary ? "已总结" : "未总结"}${m.preview ? " · " + m.preview : ""}`;
+    b.append(t, s);
+    b.addEventListener("click", () => openMeeting(m));
+    li.append(b);
+    list.append(li);
+  }
+}
+
+// ---------- Translation ----------
+function translatePrompt(items, i) {
+  const prev = items.slice(Math.max(0, i - 2), i).filter((x) => x.st === "ok");
+  const ctx = prev.map((x) => `${x.en}\n→ ${x.zh}`).join("\n\n");
+  return [
+    "你是专业的英译中同声传译。把【当前片段】翻译成自然流畅的简体中文。",
+    "- 英文来自实时语音听写，可能有同音词错误、缺标点或断句不当，请按上下文理解原意再翻译。",
+    "- 片段可能在句中截断：照实翻译已有部分，不要加省略号，不要补写没说的内容。",
+    "- 人名、数字、术语保持准确，并与前文译法一致。",
+    "- 只输出译文，不要解释。",
+    ctx ? `\n【前文（仅供参考，不要翻译）】\n${ctx}` : "",
+    `\n【当前片段】\n${items[i].en}`,
+  ].join("\n");
+}
+
+let cur = null; // live session state
+
+function liveRow(item) {
+  if (!item.li) {
+    item.li = document.createElement("li");
+    item.li.className = "pair";
+    item.li.innerHTML = '<span class="meta"></span><span class="en"></span><span class="zh"></span>';
+    $("liveList").prepend(item.li); // newest first, right under the dictation box
+  }
+  item.li.querySelector(".meta").textContent = fmtTime(item.t);
+  item.li.querySelector(".en").textContent = item.en;
+  const zh = item.li.querySelector(".zh");
+  zh.className = "zh " + (item.st === "wait" ? "wait" : item.st === "err" ? "err" : "");
+  zh.textContent = item.st === "wait" ? "翻译中…" : item.st === "err" ? `翻译失败（${item.err}），稍后自动重试` : item.zh;
+}
+
+function setState(cls, text) { const c = $("liveState"); c.className = "chip " + cls; c.textContent = text; }
+
+async function translateItem(i) {
+  const item = cur.items[i];
+  item.st = "wait"; item.tries = (item.tries || 0) + 1;
+  liveRow(item);
+  try {
+    if (!sample) throw { code: "unavailable", message: "无法使用 Claude" };
+    const { text } = await sample(translatePrompt(cur.items, i), { modelTier: "quick", cache: false });
+    item.zh = text.trim(); item.st = "ok";
+    setState("ok", "翻译中");
+  } catch (e) {
+    item.st = "err"; item.err = e.code === "rate_limited" ? "额度限速" : e.code === "not_granted" ? "未允许使用 Claude" : (e.code || "错误");
+    setState("bad", item.err);
+    if (e.code === "not_granted") showNote("翻译需要你允许此页面使用 Claude，请重新打开页面并点「允许」。");
+  }
+  liveRow(item);
+  cur.meta.count = cur.items.length;
+  if (!cur.meta.preview && item.en) cur.meta.preview = item.en.slice(0, 60);
+  store.savePage(cur.meta, Math.floor(i / PAGE), cur.items);
+  store.saveMeta(cur.meta);
+}
+
+// Take the newly dictated text up to the last finished sentence.
+function takeChunk(force) {
+  const text = $("dict").value;
+  if (text.length < cur.done) cur.done = 0; // box was cleared
+  const rest = text.slice(cur.done);
+  let end = -1, m;
+  const re = /[.!?。！？](\s|$)/g;
+  while ((m = re.exec(rest))) end = m.index + 1;
+  if (end < 0 && (force || Date.now() - cur.lastChange > 5000)) end = rest.length;
+  if (end < 0 && rest.length > 240) end = rest.lastIndexOf(" ", rest.length - 30); // no punctuation from Voice Control
+  if (end <= 0) return "";
+  const chunk = rest.slice(0, end).trim();
+  cur.done += end;
+  return chunk.length > 1 ? chunk : "";
+}
+
+async function tick(force = false) {
+  if (!cur || cur.busy) return;
+  cur.busy = true;
+  try {
+    const retry = cur.items.findIndex((x) => x.st !== "ok" && (x.tries || 0) < 4);
+    if (retry >= 0 && !force) { await translateItem(retry); return; }
+    const chunk = takeChunk(force);
+    if (!chunk) return;
+    cur.items.push({ t: Date.now(), en: chunk, zh: "", st: "wait" });
+    await translateItem(cur.items.length - 1);
+  } finally { cur.busy = false; }
+}
+
+let wakeLock = null;
+function keepAwake() { navigator.wakeLock?.request("screen").then((l) => { wakeLock = l; }).catch(() => {}); }
+document.addEventListener("visibilitychange", () => { if (cur && document.visibilityState === "visible") keepAwake(); });
+
+function startLive(meta, items) {
+  cur = { meta, items, done: 0, lastChange: 0, busy: false, timer: null, stallTimer: null };
+  $("liveTitle").textContent = meta.title;
+  $("liveList").replaceChildren();
+  for (const it of items.slice(-20)) liveRow(it);
+  $("dict").value = "";
+  $("stall").hidden = true;
+  showNote("");
+  setState("wait", "等待听写");
+  show("live");
+  $("dict").focus();
+  keepAwake();
+  cur.timer = setInterval(() => tick(false), TICK_MS);
+  cur.stallTimer = setInterval(() => {
+    const quiet = Date.now() - cur.lastChange;
+    $("stall").hidden = !(cur.lastChange && quiet > 10000);
+  }, 2000);
+}
+
+$("dict").addEventListener("input", () => {
+  if (!cur) return;
+  cur.lastChange = Date.now();
+  $("stall").hidden = true;
+  if ($("liveState").textContent === "等待听写") setState("wait", "听写中");
+  const d = $("dict"); d.scrollTop = d.scrollHeight;
+});
+
+$("newBtn").addEventListener("click", async () => {
+  const now = Date.now();
+  const meta = { id: "m" + now, title: `${fmtDate(now)} 会议`, startedAt: now, count: 0, preview: "", summary: "" };
+  startLive(meta, []);
+  await ready;
+  store.saveMeta(meta);
+});
+
+$("endBtn").addEventListener("click", async () => {
+  if (!cur) return;
+  const btn = $("endBtn");
+  btn.disabled = true; btn.textContent = "保存中…";
+  clearInterval(cur.timer); clearInterval(cur.stallTimer);
+  while (cur.busy) await sleep(300);
+  await tick(true);
+  await chain;
+  wakeLock?.release().catch(() => {}); wakeLock = null;
+  const meta = cur.meta, items = cur.items.map(({ t, en, zh, st }) => ({ t, en, zh, st }));
+  cur = null;
+  btn.disabled = false; btn.textContent = "结束";
+  openMeeting(meta, items);
+});
+
+// ---------- Meeting detail ----------
+let open = null; // { meta, items }
+
+function md(src) {
+  const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const inline = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  const out = []; let list = null;
+  const close = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  for (const raw of src.split("\n")) {
+    const line = raw.trimEnd(); let m;
+    if ((m = line.match(/^(#{1,4})\s+(.*)$/))) { close(); const h = Math.min(m[1].length + 1, 4); out.push(`<h${h}>${inline(m[2])}</h${h}>`); }
+    else if ((m = line.match(/^\s*[-*•]\s+(.*)$/))) { if (list !== "ul") { close(); out.push("<ul>"); list = "ul"; } out.push(`<li>${inline(m[1])}</li>`); }
+    else if ((m = line.match(/^\s*\d+[.)、]\s*(.*)$/))) { if (list !== "ol") { close(); out.push("<ol>"); list = "ol"; } out.push(`<li>${inline(m[1])}</li>`); }
+    else if (!line.trim()) close();
+    else { close(); out.push(`<p>${inline(line)}</p>`); }
+  }
+  close();
+  return out.join("");
+}
+
+function renderSummary(text) {
+  $("sumOut").innerHTML = text ? md(text) : '<p class="hint">还没有总结。点上方按钮生成：概要、要点、结论/决定、待办事项、关键术语。</p>';
+  $("sumBtn").textContent = open && open.meta.summary ? "重新生成总结" : "生成中文总结";
+}
+
+function setTab(tab) {
+  document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  $("tabSum").hidden = tab !== "sum";
+  $("tabText").hidden = tab !== "text";
+}
+document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
+
+async function openMeeting(meta, items) {
+  show("meeting");
+  open = { meta, items: items || [] };
+  $("mTitle").textContent = meta.title;
+  $("mMeta").textContent = "加载中…";
+  $("delConfirm").hidden = true; $("delBtn").hidden = false;
+  $("sumProg").textContent = ""; $("copyMsg").textContent = "";
+  renderSummary(meta.summary);
+  setTab("sum");
+  if (!items) {
+    try { open.items = await store.loadItems(meta); } catch (e) { $("mMeta").textContent = "读取失败：" + errText(e); return; }
+  }
+  const its = open.items;
+  const mins = its.length ? Math.max(1, Math.round((its[its.length - 1].t - its[0].t) / 60000)) : 0;
+  $("mMeta").textContent = `${its.length} 段 · 约 ${mins} 分钟`;
+  const ol = $("mList"); ol.replaceChildren();
+  for (const it of its) {
+    const li = document.createElement("li"); li.className = "pair";
+    const a = document.createElement("span"); a.className = "meta"; a.textContent = fmtTime(it.t);
+    const b = document.createElement("span"); b.className = "en"; b.textContent = it.en;
+    const c = document.createElement("span"); c.className = "zh" + (it.st === "ok" ? "" : " err"); c.textContent = it.st === "ok" ? it.zh : "（未翻译）";
+    li.append(a, b, c); ol.append(li);
+  }
+}
+
+$("backBtn").addEventListener("click", () => { open = null; renderHome(); });
+$("contBtn").addEventListener("click", () => { if (open) startLive(open.meta, open.items); });
+
+async function ask(prompt, onText) {
+  const { text } = await sample(prompt, { modelTier: "default", cache: false, onText: onText ? ({ text }) => onText(text) : undefined });
+  return text.trim();
+}
+
+const SUMMARY_SPEC = [
+  "请用简体中文写总结，使用 Markdown，按以下小标题：",
+  "## 概要（2～3 句）",
+  "## 要点（列表）",
+  "## 结论 / 决定",
+  "## 待办事项（提到负责人或时间就写上）",
+  "## 关键术语（英文 → 中文）",
+  "没有内容的部分写「无」。不要使用表格。",
+].join("\n");
+
+$("sumBtn").addEventListener("click", async () => {
+  if (!open) return;
+  await ready;
+  if (!sample) { $("sumProg").textContent = "需要在 Claude App 中打开才能总结。"; return; }
+  const its = open.items.filter((x) => x.en);
+  if (!its.length) { $("sumProg").textContent = "这场会议还没有内容。"; return; }
+  const btn = $("sumBtn"); btn.disabled = true;
+  const prog = $("sumProg");
+  try {
+    const lim = await sample.limits().catch(() => ({ maxPromptBytes: 262144 }));
+    const budget = Math.floor((lim.maxPromptBytes || 262144) * 0.8);
+    const intro = "以下是一场英文会议/讲座的同声传译记录：英文原文来自实时语音听写（可能有识别错误），中文是机器译文。\n\n";
+    let body = its.map((x) => `[${fmtTime(x.t)}] ${x.en}\n${x.zh || ""}`).join("\n\n");
+    if (bytes(intro + body) > budget) body = its.map((x) => `[${fmtTime(x.t)}] ${x.en}`).join("\n");
+    let prompt;
+    if (bytes(intro + body) <= budget) {
+      prompt = `${intro}<transcript>\n${body}\n</transcript>\n\n${SUMMARY_SPEC}`;
+    } else {
+      // Too long for one request: take notes per part, then summarize the notes.
+      const parts = []; let part = "";
+      for (const x of its) {
+        const line = `[${fmtTime(x.t)}] ${x.en}\n`;
+        if (bytes(part + line) > budget && part) { parts.push(part); part = ""; }
+        part += line;
+      }
+      if (part) parts.push(part);
+      const notes = [];
+      for (let i = 0; i < parts.length; i++) {
+        prog.textContent = `会议较长，正在分段整理 ${i + 1}/${parts.length}…`;
+        notes.push(await ask(`以下是一场英文会议记录的第 ${i + 1}/${parts.length} 部分（语音听写，可能有识别错误）。请用简体中文写出详细要点笔记，保留数字、人名、结论和待办事项。\n\n<part>\n${parts[i]}\n</part>`));
+      }
+      prompt = `以下是一场英文会议按时间顺序分段整理的中文笔记：\n\n${notes.map((n, i) => `<notes part="${i + 1}">\n${n}\n</notes>`).join("\n\n")}\n\n请据此为整场会议写总结。\n${SUMMARY_SPEC}`;
+    }
+    prog.textContent = "正在生成总结…";
+    const summary = await ask(prompt, (t) => { $("sumOut").innerHTML = md(t); });
+    open.meta.summary = summary; open.meta.summaryAt = Date.now();
+    renderSummary(summary);
+    store.saveMeta(open.meta);
+    prog.textContent = "已保存";
+  } catch (e) {
+    prog.textContent = e.code === "rate_limited" ? "已达到 Claude 使用上限，请稍后再试。" : "生成失败：" + errText(e);
+    renderSummary(open.meta.summary);
+  } finally { btn.disabled = false; }
+});
+
+$("copyBtn").addEventListener("click", () => {
+  if (!open) return;
+  const m = open.meta;
+  const text = [`${m.title}`, "", m.summary ? `【总结】\n${m.summary}\n` : "", "【原文与译文】",
+    ...open.items.map((x) => `[${fmtTime(x.t)}]\n${x.en}\n${x.zh || "（未翻译）"}\n`)].join("\n");
+  const fallback = () => { const a = $("copyArea"); a.hidden = false; a.value = text; a.select(); $("copyMsg").textContent = "已选中全文，请手动复制"; };
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(() => { $("copyMsg").textContent = "已复制"; }, fallback);
+  else fallback();
+});
+
+$("delBtn").addEventListener("click", () => { $("delBtn").hidden = true; $("delConfirm").hidden = false; });
+$("delNo").addEventListener("click", () => { $("delBtn").hidden = false; $("delConfirm").hidden = true; });
+$("delYes").addEventListener("click", async () => {
+  if (!open) return;
+  $("delYes").disabled = true;
+  try { await store.remove(open.meta); open = null; renderHome(); }
+  catch (e) { $("copyMsg").textContent = "删除失败：" + errText(e); }
+  finally { $("delYes").disabled = false; }
+});
+
+renderHome();
+})();
+</script>

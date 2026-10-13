@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f6feb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="同声传译">
+  <title>Claude 同声传译</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="langs">
+      <select id="srcLang" aria-label="源语言"></select>
+      <button id="swapBtn" class="icon-btn" title="交换语言" aria-label="交换语言">⇄</button>
+      <select id="tgtLang" aria-label="目标语言"></select>
+    </div>
+    <button id="settingsBtn" class="icon-btn" aria-label="设置">⚙︎</button>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="live" class="active">实时传译</button>
+    <button role="tab" data-tab="summary">总结</button>
+    <select id="viewMode" aria-label="显示方式">
+      <option value="both">双语</option>
+      <option value="tgt">仅译文</option>
+      <option value="src">仅原文</option>
+    </select>
+  </nav>
+
+  <main>
+    <section id="live" class="panel active">
+      <div id="empty" class="empty">
+        <p>点击下方 🎙 开始同声传译</p>
+        <p class="hint">每句话会保留<b>原文</b>与<b>译文</b>，结束后可一键生成<b>总结</b>。</p>
+      </div>
+      <ol id="segments"></ol>
+      <div id="interim" class="interim" hidden></div>
+    </section>
+
+    <section id="summary" class="panel">
+      <div class="summary-actions">
+        <button id="summarizeBtn" class="primary">生成 / 更新总结</button>
+        <select id="summaryLang" aria-label="总结语言"></select>
+      </div>
+      <article id="summaryOut" class="md"><p class="hint">暂无总结。传译内容会被整理为：概要、要点、结论、待办事项和术语对照。</p></article>
+    </section>
+  </main>
+
+  <footer class="bottombar">
+    <form id="typeForm" class="type-form">
+      <input id="typeInput" type="text" placeholder="也可以直接输入文字翻译…" autocomplete="off">
+    </form>
+    <div class="controls">
+      <button id="newBtn" class="icon-btn" title="新会话" aria-label="新会话">＋</button>
+      <button id="micBtn" class="mic" aria-label="开始/停止">🎙</button>
+      <button id="exportBtn" class="icon-btn" title="导出" aria-label="导出">⤓</button>
+    </div>
+    <div id="status" class="status">准备就绪</div>
+  </footer>
+
+  <dialog id="settings">
+    <form method="dialog" class="settings-form">
+      <h2>设置</h2>
+      <div id="proxyNote" class="note" hidden>已连接服务器代理，无需填写 API Key。</div>
+      <label id="keyRow">Anthropic API Key
+        <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off">
+        <small>仅保存在本机浏览器中，直接发送到 api.anthropic.com。</small>
+      </label>
+      <label id="pwRow" hidden>访问密码
+        <input id="password" type="password" autocomplete="off">
+      </label>
+      <label>模型
+        <select id="model">
+          <option value="claude-opus-5-5">Claude Opus 5.5（最准确）</option>
+          <option value="claude-sonnet-5-5">Claude Sonnet 5.5（均衡）</option>
+          <option value="claude-haiku-5-5">Claude Haiku 5.5（最快最省）</option>
+        </select>
+      </label>
+      <label>会议主题 / 专业术语（可选）
+        <textarea id="topic" rows="3" placeholder="例如：医疗器械发布会；术语：stent=支架"></textarea>
+      </label>
+      <label class="check"><input id="tts" type="checkbox"> 朗读译文（建议佩戴耳机，避免回音被识别）</label>
+      <label class="check"><input id="autoSummary" type="checkbox"> 停止录音时自动生成总结</label>
+      <div class="dialog-actions">
+        <button value="cancel">取消</button>
+        <button id="saveSettings" value="save" class="primary">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

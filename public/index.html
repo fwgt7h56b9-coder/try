@@ -25,6 +25,7 @@
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="live" class="active">实时传译</button>
     <button role="tab" data-tab="summary">总结</button>
+    <button role="tab" data-tab="history">历史</button>
     <select id="viewMode" aria-label="显示方式">
       <option value="both">双语</option>
       <option value="tgt">仅译文</option>
@@ -49,6 +50,10 @@
       </div>
       <article id="summaryOut" class="md"><p class="hint">暂无总结。传译内容会被整理为：概要、要点、结论、待办事项和术语对照。</p></article>
     </section>
+    <section id="history" class="panel">
+      <p class="hint">所有会议自动保存在本机浏览器中。点一场会议可查看、继续记录或生成总结。</p>
+      <ul id="historyList" class="history"></ul>
+    </section>
   </main>
 
   <footer class="bottombar">
@@ -66,21 +71,23 @@
   <dialog id="settings">
     <form method="dialog" class="settings-form">
       <h2>设置</h2>
-      <div id="proxyNote" class="note" hidden>已连接服务器代理，无需填写 API Key。</div>
-      <label id="keyRow">Anthropic API Key
-        <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off">
-        <small>仅保存在本机浏览器中，直接发送到 api.anthropic.com。</small>
-      </label>
-      <label id="pwRow" hidden>访问密码
-        <input id="password" type="password" autocomplete="off">
-      </label>
-      <label>模型
-        <select id="model">
-          <option value="claude-opus-5-5">Claude Opus 5.5（最准确）</option>
-          <option value="claude-sonnet-5-5">Claude Sonnet 5.5（均衡）</option>
-          <option value="claude-haiku-5-5">Claude Haiku 5.5（最快最省）</option>
-        </select>
-      </label>
+      <div class="two">
+        <label>翻译使用
+          <select id="translateWith"></select>
+        </label>
+        <label>总结使用
+          <select id="summarizeWith"></select>
+        </label>
+      </div>
+      <p class="hint">只需填写要用到的 AI 的 Key。Key 仅保存在本机浏览器中，直接发送给对应的 AI 服务。</p>
+      <div id="providerList" class="providers"></div>
+      <details class="relay">
+        <summary>中转（某家「测试连接」失败时使用）</summary>
+        <label>中转地址
+          <input id="relayUrl" type="url" placeholder="https://xxx.workers.dev" autocomplete="off">
+        </label>
+        <small>部分 AI 不允许网页直接调用。按 README 中的步骤免费部署 Cloudflare 中转后，把地址填在这里，并勾选该 AI 的「通过中转」。</small>
+      </details>
       <label>会议主题 / 专业术语（可选）
         <textarea id="topic" rows="3" placeholder="例如：医疗器械发布会；术语：stent=支架"></textarea>
       </label>

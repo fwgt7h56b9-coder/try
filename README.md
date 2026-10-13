@@ -1,70 +1,75 @@
-# Claude 同声传译（手机网页版）
+# 同声传译（手机网页版，支持多家 AI）
 
-一个在手机浏览器里直接打开就能用的同声传译工具，由 Claude 提供翻译与总结：
+在 iPhone Safari / 安卓 Chrome 里打开就能用的同声传译工具：
 
-- 🎙 **实时语音识别**：使用手机浏览器内置语音识别，边说边出字
-- 🔁 **逐句同声传译**：每句话流式翻译，**原文与译文并排保留**（可切换 双语 / 仅译文 / 仅原文）
-- 📝 **一键总结**：概要、要点、结论/决定、待办事项、关键术语对照，可选总结语言
-- 📚 **会议主题 / 术语表**：提前填写，让专业名词翻译更准确
-- 🔊 可选朗读译文、⤓ 导出 Markdown（含总结 + 全部原文译文）、记录自动保存在本机
-- 📱 可"添加到主屏幕"，像 App 一样使用；录音时保持屏幕常亮
-- 支持中、英、日、韩、法、德、西、俄、葡、意、阿、泰、越、印尼、粤语等
+- 🎙 **麦克风持续识别**：使用浏览器内置语音识别，边说边出字
+- 🔁 **逐句翻译**：每句话说完约 1～2 秒出译文，**原文与译文并排保留**（可切换 双语 / 仅译文 / 仅原文）
+- 🤖 **多家 AI 可选**：Claude、DeepSeek、通义千问、Kimi、智谱 GLM、豆包；**翻译和总结可分别选择**（默认翻译用 DeepSeek，总结用 Claude）
+- 📝 **一键总结**：概要、要点、结论/决定、待办事项、关键术语对照
+- 🗂 **历史会议**：每场会议自动保存在本机浏览器，可回看、继续记录、删除
+- 📚 会议主题 / 术语表、朗读译文、导出 Markdown、添加到主屏幕
 
-## 使用方式
+## 开始使用
 
-### 方式一：GitHub Pages 链接（最简单，每人用自己的 API Key）
+### 1. 部署链接（GitHub Pages）
 
 1. 仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**
 2. 把代码合并到 `main` 分支，Actions 会自动部署 `public/` 目录
-3. 手机打开 `https://<你的用户名>.github.io/<仓库名>/`
-4. 首次打开在设置里填入 [Anthropic API Key](https://console.anthropic.com/)（只保存在本机浏览器，直接发往 api.anthropic.com）
+3. 手机 Safari 打开 `https://<用户名>.github.io/<仓库名>/`，可"分享 → 添加到主屏幕"
 
-> 私有仓库使用 GitHub Pages 需要付费计划；也可以把 `public/` 目录放到任何静态网站托管（Netlify、Vercel、Cloudflare Pages 等）。
+> 私有仓库使用 GitHub Pages 需要付费计划；也可把 `public/` 放到 Netlify、Cloudflare Pages 等任意静态托管。
 
-### 方式二：自己的服务器（API Key 保存在服务器，适合分享给团队）
+### 2. 填写 API Key
 
-需要 Node.js 18+，无任何第三方依赖：
+首次打开会弹出设置：
 
-```bash
-ANTHROPIC_API_KEY=sk-ant-xxx APP_PASSWORD=设置一个访问密码 npm start
-# 默认端口 3000，可用 PORT 修改
-```
+1. 选择「翻译使用」和「总结使用」的 AI
+2. 在对应 AI 的卡片里填 API Key（点「获取 Key」直达各家控制台），模型名可留空用默认值
+3. 点「测试连接」，显示「可用 ✓」即可；保存
 
-服务器会提供网页并代理 Claude API 请求，使用者只需输入访问密码，看不到 API Key。
-可部署到 Render、Railway、Fly.io、云服务器等。**语音识别要求 HTTPS**（localhost 除外），请在 HTTPS 域名下使用。
+Key 只保存在本机浏览器里，直接发送给对应 AI 服务。
 
-## 手机浏览器支持
+| AI | 默认模型 | 默认接口地址 | 说明 |
+| --- | --- | --- | --- |
+| Claude | claude-opus-5-5 | api.anthropic.com | 可选 Sonnet 5.5 / Haiku 5.5 |
+| DeepSeek | deepseek-chat | api.deepseek.com | 便宜快速，适合逐句翻译 |
+| 通义千问 | qwen-plus | dashscope-intl（国际站） | 国内账号改为 `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| Kimi | moonshot-v1-32k | api.moonshot.ai（国际站） | 国内账号改为 `https://api.moonshot.cn/v1` |
+| 智谱 GLM | glm-4-flash | open.bigmodel.cn | Z.ai 国际账号改为 `https://api.z.ai/api/paas/v4` |
+| 豆包 | （需填写） | 火山方舟北京 | 模型处填方舟控制台的模型 ID 或接入点 ID（ep-…）；BytePlus 用 `https://ark.ap-southeast.bytepluses.com/api/v3` |
+
+各家模型名会更新，如测试提示"找不到该模型"，到对应控制台复制最新模型名填入即可。接口地址在卡片的「高级」里修改。
+
+### 3.（可选）某家「测试连接」显示无法连接时：部署免费中转
+
+部分 AI 服务不允许网页直接调用（浏览器跨域限制）。用 Cloudflare 免费部署一个中转即可：
+
+1. 注册并登录 [Cloudflare](https://dash.cloudflare.com/)（免费）
+2. 左侧 **Workers & Pages → Create → Create Worker**，名字随意，点 **Deploy**
+3. 点 **Edit code**，删掉默认代码，粘贴本仓库 [`relay/worker.js`](relay/worker.js) 的全部内容，点 **Deploy**
+4. 复制 Worker 地址（形如 `https://xxx.你的子域.workers.dev`）
+5. 回到网页 **设置 → 中转** 填入该地址，在连不上的 AI 卡片「高级」里勾选 **通过中转**，再点「测试连接」
+
+建议在 Worker 的 **Settings → Variables** 添加变量 `ALLOW_ORIGIN`，值为你的网页地址（如 `https://用户名.github.io`），这样只有你的网页能使用这个中转。中转只转发请求，不保存任何内容；只允许访问上述 AI 服务的域名。
+
+## 浏览器支持
 
 | 系统 | 推荐浏览器 |
 | --- | --- |
+| iPhone / iPad | Safari（iOS 14.5+） |
 | Android | Chrome |
-| iOS / iPadOS | Safari（iOS 14.5+） |
 
-微信等 App 内置浏览器通常不支持语音识别，请点右上角"在浏览器中打开"。不支持语音识别时也可以在底部输入框直接打字翻译。
-
-## 模型
-
-设置中可选择：
-
-- **Claude Opus 5.5**（默认，最准确）
-- **Claude Sonnet 5.5**（速度与质量均衡）
-- **Claude Haiku 5.5**（最快、最便宜，适合长时间会议）
-
-翻译使用低推理强度以降低延迟，总结使用中等强度；Opus / Sonnet 启用了服务端拒答自动回退。
+微信等 App 内置浏览器通常不支持语音识别。首次点麦克风时请允许麦克风权限；被拒绝后可在 设置 → Safari → 麦克风 中修改。不支持语音识别时也可以在底部输入框打字翻译。
 
 ## 文件结构
 
 ```
-public/            前端（纯静态，可直接托管）
+public/                  网页（纯静态，可直接托管）
   index.html
-  app.js           语音识别、Claude 调用、总结、导出
+  app.js                 语音识别、调用 AI、总结、历史、导出
+  providers.js           各家 AI 的默认接口地址和模型
   style.css
-server.js          可选：静态服务 + Claude API 代理（隐藏 API Key、访问密码）
+relay/worker.js          可选：Cloudflare Worker 中转
+claude-app/              Claude 会员版（在 Claude App 中以 Artifact 使用，键盘听写输入）
 .github/workflows/pages.yml   GitHub Pages 自动部署
 ```
-
-## 会员版（在 Claude App 里使用，不需要 API Key）
-
-`claude-app/interpreter.html` 是发布在 claude.ai 上的 Artifact 版本：使用 Claude 会员额度翻译，
-通过 iPhone 键盘听写或「语音控制」输入英文（claude.ai 页面内无法直接使用麦克风），
-每约 12 秒翻译一次，会议记录保存在账号下的私有存储中，结束后可生成中文总结。

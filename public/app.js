@@ -1,9 +1,10 @@
 import Anthropic from "https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.128.0/+esm";
+import { PROVIDERS, PROVIDER_IDS } from "./providers.js";
 
 // ---------- Languages ----------
 const LANGS = [
-  ["zh-CN", "中文（普通话）"],
   ["en-US", "English"],
+  ["zh-CN", "中文（普通话）"],
   ["ja-JP", "日本語"],
   ["ko-KR", "한국어"],
   ["fr-FR", "Français"],
@@ -21,19 +22,21 @@ const LANGS = [
 const langName = (code) => LANGS.find(([c]) => c === code)?.[1] ?? code;
 
 // ---------- Storage (best effort) ----------
+let warnedFull = false;
 const store = {
   get(key, fallback) {
     try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
   },
   set(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ }
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch {
+      if (!warnedFull) { warnedFull = true; toast("本机存储已满，请在「历史」里删除一些旧会议", 6000); }
+      return false;
+    }
   },
+  del(key) { try { localStorage.removeItem(key); } catch { /* unavailable */ } },
 };
 
-const settings = Object.assign({
-  apiKey: "",
-  password: "",
-  model: "claude-opus-5-5",
+const DEFAULTS = {
   srcLang: "en-US",
   tgtLang: "zh-CN",
   summaryLang: "zh-CN",
@@ -41,12 +44,56 @@ const settings = Object.assign({
   tts: false,
   autoSummary: false,
   viewMode: "both",
-}, store.get("si.settings", {}));
-
-const newSession = () => ({ id: Date.now(), startedAt: new Date().toISOString(), segments: [], summary: "" });
-let session = store.get("si.session", null) ?? newSession();
-const saveSession = () => store.set("si.session", session);
+  translateWith: "deepseek",
+  summarizeWith: "claude",
+  relayUrl: "",
+  providers: {},
+};
+const settings = Object.assign(structuredClone(DEFAULTS), store.get("si.settings", {}));
+// Earlier versions stored a single Claude key at the top level.
+if (settings.apiKey && !settings.providers.claude) {
+  settings.providers.claude = { apiKey: settings.apiKey, model: settings.model || "" };
+  delete settings.apiKey; delete settings.model; delete settings.password;
+}
 const saveSettings = () => store.set("si.settings", settings);
+const providerCfg = (id, from = settings) => ({ apiKey: "", model: "", baseURL: "", useRelay: false, ...(from.providers[id] || {}) });
+
+// ---------- Meetings (history) ----------
+const newSession = () => ({ id: "m" + Date.now(), startedAt: new Date().toISOString(), segments: [], summary: "" });
+const meetingTitle = (s) => new Date(s.startedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) + " 会议";
+
+function loadIndex() { return store.get("si.meetings", []); }
+function saveIndex(index) { store.set("si.meetings", index); }
+
+function loadInitialSession() {
+  const legacy = store.get("si.session", null); // single-session storage from earlier versions
+  if (legacy) {
+    legacy.id = legacy.id ? "m" + legacy.id : "m" + Date.now();
+    store.del("si.session");
+    if (legacy.segments?.length) { persist(legacy); return legacy; }
+  }
+  const currentId = store.get("si.current", null);
+  return (currentId && store.get(`si.m.${currentId}`, null)) || newSession();
+}
+
+function persist(s = session) {
+  if (!s.segments.length && !s.summary) return; // don't list empty meetings
+  store.set(`si.m.${s.id}`, s);
+  const index = loadIndex().filter((m) => m.id !== s.id);
+  index.unshift({
+    id: s.id,
+    startedAt: s.startedAt,
+    count: s.segments.length,
+    hasSummary: Boolean(s.summary),
+    preview: s.segments[0]?.src.slice(0, 60) ?? "",
+  });
+  index.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  saveIndex(index);
+  store.set("si.current", s.id);
+}
+
+let session = loadInitialSession();
+const saveSession = () => persist(session);
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
@@ -55,20 +102,25 @@ const els = {
   segments: $("segments"), interim: $("interim"), empty: $("empty"), main: document.querySelector("main"),
   micBtn: $("micBtn"), newBtn: $("newBtn"), exportBtn: $("exportBtn"), status: $("status"),
   typeForm: $("typeForm"), typeInput: $("typeInput"), viewMode: $("viewMode"),
-  summarizeBtn: $("summarizeBtn"), summaryOut: $("summaryOut"),
-  settingsDlg: $("settings"), settingsBtn: $("settingsBtn"), apiKey: $("apiKey"), password: $("password"),
-  model: $("model"), topic: $("topic"), tts: $("tts"), autoSummary: $("autoSummary"),
-  keyRow: $("keyRow"), pwRow: $("pwRow"), proxyNote: $("proxyNote"), toast: $("toast"),
+  summarizeBtn: $("summarizeBtn"), summaryOut: $("summaryOut"), historyList: $("historyList"),
+  settingsDlg: $("settings"), settingsBtn: $("settingsBtn"), topic: $("topic"), tts: $("tts"),
+  autoSummary: $("autoSummary"), translateWith: $("translateWith"), summarizeWith: $("summarizeWith"),
+  providerList: $("providerList"), relayUrl: $("relayUrl"), toast: $("toast"),
 };
 
 for (const sel of [els.srcLang, els.tgtLang, els.summaryLang]) {
   for (const [code, name] of LANGS) sel.add(new Option(name, code));
+}
+for (const sel of [els.translateWith, els.summarizeWith]) {
+  for (const id of PROVIDER_IDS) sel.add(new Option(PROVIDERS[id].name, id));
 }
 els.srcLang.value = settings.srcLang;
 els.tgtLang.value = settings.tgtLang;
 els.summaryLang.value = settings.summaryLang;
 els.viewMode.value = settings.viewMode;
 document.body.className = `view-${settings.viewMode}`;
+els.newBtn.title = "新会议";
+els.newBtn.setAttribute("aria-label", "新会议");
 
 let toastTimer;
 function toast(msg, ms = 3500) {
@@ -79,49 +131,41 @@ function toast(msg, ms = 3500) {
 }
 const setStatus = (msg) => { els.status.textContent = msg; };
 
-// ---------- Claude client ----------
-// Proxy mode: when served by server.js, requests go to ./api/v1/messages and the
-// server adds the API key. Otherwise (e.g. GitHub Pages) the user's own key is used.
-let proxy = { enabled: false, passwordRequired: false };
-
-async function detectProxy() {
-  try {
-    const res = await fetch("api/config", { cache: "no-store" });
-    if (res.ok) proxy = { enabled: true, ...(await res.json()) };
-  } catch { /* static hosting */ }
+// ---------- AI providers ----------
+class ProviderError extends Error {
+  constructor(provider, status, message) { super(message); this.provider = provider; this.status = status; }
 }
 
-function getClient() {
-  if (proxy.enabled) {
-    return new Anthropic({
-      apiKey: "server-side",
-      baseURL: new URL("api", location.href).href.replace(/\/$/, ""),
-      dangerouslyAllowBrowser: true,
-      defaultHeaders: settings.password ? { "x-app-password": settings.password } : {},
-    });
-  }
-  if (!settings.apiKey) return null;
-  return new Anthropic({ apiKey: settings.apiKey, dangerouslyAllowBrowser: true });
+function endpointFor(id, cfg) {
+  let base = (cfg.baseURL || PROVIDERS[id].baseURL).trim().replace(/\/+$/, "");
+  if (cfg.useRelay && settings.relayUrl) base = `${settings.relayUrl.trim().replace(/\/+$/, "")}/${base}`;
+  return base;
 }
 
-function needsSetup() {
-  if (proxy.enabled) return proxy.passwordRequired && !settings.password;
-  return !settings.apiKey;
+// Streams a completion from provider `id`; returns the full text.
+// `cfg` overrides the saved provider settings (used by "Test connection").
+async function complete(id, { system, user, maxTokens, effort, onText }, cfg = providerCfg(id)) {
+  const def = PROVIDERS[id];
+  if (!cfg.apiKey) throw new ProviderError(def.name, 0, `请先在设置中填写 ${def.name} 的 API Key`);
+  const model = (cfg.model || def.defaultModel).trim();
+  if (!model) throw new ProviderError(def.name, 0, `请先在设置中填写 ${def.name} 的模型名`);
+  const base = endpointFor(id, cfg);
+  return def.kind === "anthropic"
+    ? completeClaude({ base, apiKey: cfg.apiKey, model, system, user, maxTokens, effort, onText })
+    : completeOpenAI({ name: def.name, base, apiKey: cfg.apiKey, model, system, user, maxTokens, onText });
 }
 
-// Streams a reply into onText; returns the full text.
-async function streamClaude({ system, user, maxTokens, effort, onText }) {
-  const client = getClient();
-  if (!client) throw new Error("请先在设置中填写 API Key");
+async function completeClaude({ base, apiKey, model, system, user, maxTokens, effort, onText }) {
+  const client = new Anthropic({ apiKey, baseURL: base, dangerouslyAllowBrowser: true });
   const params = {
-    model: settings.model,
+    model,
     max_tokens: maxTokens,
     system,
     messages: [{ role: "user", content: user }],
     output_config: { effort },
   };
-  // Server-side refusal fallback (Opus / Sonnet only; Haiku has none).
-  if (settings.model !== "claude-haiku-5-5") {
+  // Server-side refusal fallback (Opus / Sonnet only).
+  if (/^claude-(opus|sonnet)/.test(model)) {
     params.betas = ["server-side-fallback-2026-07-01"];
     params.fallbacks = "default";
   }
@@ -129,18 +173,73 @@ async function streamClaude({ system, user, maxTokens, effort, onText }) {
   let text = "";
   stream.on("text", (delta) => { text += delta; onText?.(text); });
   const message = await stream.finalMessage();
-  if (message.stop_reason === "refusal") throw new Error("Claude 拒绝了该请求");
+  if (message.stop_reason === "refusal") throw new ProviderError("Claude", 0, "Claude 拒绝了该请求");
+  return text.trim();
+}
+
+async function completeOpenAI({ name, base, apiKey, model, system, user, maxTokens, onText }) {
+  let res;
+  try {
+    res = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        stream: true,
+        max_tokens: maxTokens,
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      }),
+    });
+  } catch {
+    throw new ProviderError(name, -1, `无法连接 ${name}：网络问题，或该服务不允许网页直接调用（可在设置中开启中转）`);
+  }
+  if (!res.ok) {
+    let msg = res.statusText;
+    try { const j = await res.json(); msg = j.error?.message || j.message || msg; } catch { /* not JSON */ }
+    throw new ProviderError(name, res.status, msg);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "", text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (data === "[DONE]") continue;
+      let chunk;
+      try { chunk = JSON.parse(data); } catch { continue; }
+      if (chunk.error) throw new ProviderError(name, 0, chunk.error.message || "生成出错");
+      const delta = chunk.choices?.[0]?.delta?.content; // reasoning_content is skipped
+      if (delta) { text += delta; onText?.(text); }
+    }
+  }
   return text.trim();
 }
 
 function describeError(err) {
-  if (err instanceof Anthropic.AuthenticationError) return proxy.enabled ? "服务器 API Key 无效" : "API Key 无效，请检查设置";
-  if (err instanceof Anthropic.PermissionDeniedError) return "没有权限（访问密码错误或账户无权限）";
-  if (err instanceof Anthropic.RateLimitError) return "请求过于频繁，请稍后重试";
-  if (err instanceof Anthropic.APIConnectionError) return "网络连接失败";
-  if (err instanceof Anthropic.APIError) return `API 错误 ${err.status ?? ""}: ${err.message}`;
+  if (err instanceof Anthropic.AuthenticationError) return "Claude API Key 无效，请检查设置";
+  if (err instanceof Anthropic.PermissionDeniedError) return "Claude 账户没有权限";
+  if (err instanceof Anthropic.RateLimitError) return "Claude 请求过于频繁，请稍后重试";
+  if (err instanceof Anthropic.APIConnectionError) return "无法连接 Claude：网络问题，或可在设置中开启中转";
+  if (err instanceof Anthropic.APIError) return `Claude 错误 ${err.status ?? ""}: ${err.message}`;
+  if (err instanceof ProviderError) {
+    if (err.status === 401 || err.status === 403) return `${err.provider} API Key 无效或无权限`;
+    if (err.status === 402) return `${err.provider} 账户余额不足`;
+    if (err.status === 429) return `${err.provider} 请求过于频繁或额度用完，请稍后重试`;
+    if (err.status === 404) return `${err.provider} 找不到该模型或接口地址，请检查模型名`;
+    if (err.status > 0) return `${err.provider} 错误 ${err.status}: ${err.message}`;
+    return err.message;
+  }
   return err?.message ?? String(err);
 }
+
+const keyMissing = (id) => !providerCfg(id).apiKey;
 
 // ---------- Translation ----------
 function translationSystem() {
@@ -161,34 +260,35 @@ function translationPrompt(index) {
 }
 
 async function translate(seg) {
+  const owner = session; // the meeting this segment belongs to
   seg.status = "pending";
   seg.error = "";
   renderSegment(seg);
   try {
-    const index = session.segments.indexOf(seg);
-    seg.tgt = await streamClaude({
+    const index = owner.segments.indexOf(seg);
+    seg.tgt = await complete(settings.translateWith, {
       system: translationSystem(),
       user: translationPrompt(index),
-      maxTokens: 4000,
+      maxTokens: 2000,
       effort: "low",
-      onText: (t) => { seg.tgt = t; renderSegment(seg); },
+      onText: (t) => { seg.tgt = t; if (owner === session) renderSegment(seg); },
     });
     seg.status = "done";
-    if (settings.tts) speak(seg.tgt);
+    if (settings.tts && owner === session) speak(seg.tgt);
   } catch (err) {
     seg.status = "error";
     seg.error = describeError(err);
-    toast(seg.error);
+    if (owner === session) toast(seg.error);
   }
-  renderSegment(seg);
-  saveSession();
+  if (owner === session) renderSegment(seg);
+  persist(owner);
 }
 
 function addSegment(text) {
   text = text.trim();
   if (!text) return;
   const last = session.segments.at(-1);
-  // Some Android builds emit the same final result twice.
+  // Some recognizers emit the same final result twice.
   if (last && last.src === text && Date.now() - last.t < 3000) return;
   const seg = { id: `${Date.now()}-${session.segments.length}`, t: Date.now(), src: text, tgt: "", status: "pending" };
   session.segments.push(seg);
@@ -237,6 +337,59 @@ function renderAll() {
     renderSegment(seg);
   }
   renderSummary(session.summary);
+  renderHistory();
+}
+
+function renderHistory() {
+  const index = loadIndex();
+  els.historyList.replaceChildren();
+  if (!index.length) {
+    const li = document.createElement("li");
+    li.className = "hint";
+    li.textContent = "还没有会议记录。";
+    els.historyList.append(li);
+    return;
+  }
+  for (const m of index) {
+    const li = document.createElement("li");
+    const open = document.createElement("button");
+    open.className = "open" + (m.id === session.id ? " current" : "");
+    const t = document.createElement("span"); t.className = "t";
+    t.textContent = meetingTitle(m) + (m.id === session.id ? "（当前）" : "");
+    const s = document.createElement("span"); s.className = "s";
+    s.textContent = `${m.count} 句 · ${m.hasSummary ? "已总结" : "未总结"}${m.preview ? " · " + m.preview : ""}`;
+    open.append(t, s);
+    open.addEventListener("click", () => openMeeting(m.id));
+    const del = document.createElement("button");
+    del.className = "del";
+    del.textContent = "删除";
+    del.addEventListener("click", () => deleteMeeting(m.id));
+    li.append(open, del);
+    els.historyList.append(li);
+  }
+}
+
+function openMeeting(id) {
+  const s = store.get(`si.m.${id}`, null);
+  if (!s) { toast("找不到这场会议"); return; }
+  if (listening) stopListening();
+  session = s;
+  store.set("si.current", id);
+  renderAll();
+  switchTab("live");
+}
+
+function deleteMeeting(id) {
+  if (!confirm("删除这场会议的全部原文、译文和总结？此操作无法撤销。")) return;
+  store.del(`si.m.${id}`);
+  saveIndex(loadIndex().filter((m) => m.id !== id));
+  if (id === session.id) {
+    if (listening) stopListening();
+    session = newSession();
+    renderAll();
+  } else {
+    renderHistory();
+  }
 }
 
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -283,31 +436,33 @@ async function summarize() {
   if (summarizing) return;
   const done = session.segments.filter((s) => s.src);
   if (!done.length) { toast("还没有传译内容"); return; }
-  if (needsSetup()) { openSettings(); return; }
+  if (keyMissing(settings.summarizeWith)) { toast(`请先填写 ${PROVIDERS[settings.summarizeWith].name} 的 API Key`); openSettings(); return; }
+  const owner = session;
   summarizing = true;
   els.summarizeBtn.disabled = true;
-  els.summarizeBtn.textContent = "正在总结…";
+  els.summarizeBtn.textContent = `正在用 ${PROVIDERS[settings.summarizeWith].name} 总结…`;
   switchTab("summary");
   const transcript = done.map((s, i) =>
     `[${i + 1}] ${fmtTime(s.t)}\n原文: ${s.src}\n译文: ${s.tgt || "(未翻译)"}`).join("\n\n");
   const lang = langName(settings.summaryLang);
   try {
-    session.summary = await streamClaude({
+    owner.summary = await complete(settings.summarizeWith, {
       system: [
         "You summarize live-interpreted speeches, meetings, and conversations. The transcript pairs each original speech-recognition segment with its machine interpretation; recognition errors are possible, so rely on context.",
         `Write the summary entirely in ${lang}, in Markdown, using these sections (translate the headings into ${lang}): Overview (2-3 sentences), Key points (bullets), Decisions / conclusions, Action items (owner and deadline when mentioned), Key terms (original term → translation). Omit a section only if there is truly nothing for it. Do not use tables.`,
         settings.topic ? `Context supplied by the user:\n${settings.topic}` : "",
       ].filter(Boolean).join("\n\n"),
       user: `<transcript source_language="${langName(settings.srcLang)}" target_language="${langName(settings.tgtLang)}">\n${transcript}\n</transcript>`,
-      maxTokens: 16000,
+      maxTokens: 8000,
       effort: "medium",
-      onText: (t) => renderSummary(t),
+      onText: (t) => { if (owner === session) renderSummary(t); },
     });
-    renderSummary(session.summary);
-    saveSession();
+    persist(owner);
+    if (owner === session) renderSummary(owner.summary);
+    renderHistory();
   } catch (err) {
-    toast(describeError(err));
-    renderSummary(session.summary);
+    toast(describeError(err), 6000);
+    if (owner === session) renderSummary(owner.summary);
   } finally {
     summarizing = false;
     els.summarizeBtn.disabled = false;
@@ -322,11 +477,11 @@ let listening = false;
 let wakeLock = null;
 
 function startListening() {
-  if (!SR) { toast("此浏览器不支持语音识别，请使用 Chrome（安卓）或 Safari（iOS），或直接输入文字"); return; }
-  if (needsSetup()) { openSettings(); return; }
+  if (!SR) { toast("此浏览器不支持语音识别，请使用 Safari（iPhone）或 Chrome（安卓），或直接输入文字"); return; }
+  if (keyMissing(settings.translateWith)) { toast(`请先填写 ${PROVIDERS[settings.translateWith].name} 的 API Key`); openSettings(); return; }
   listening = true;
   els.micBtn.classList.add("on");
-  setStatus(`正在聆听：${langName(settings.srcLang)} → ${langName(settings.tgtLang)}`);
+  setStatus(`正在聆听：${langName(settings.srcLang)} → ${langName(settings.tgtLang)} · 翻译：${PROVIDERS[settings.translateWith].name}`);
   navigator.wakeLock?.request("screen").then((l) => { wakeLock = l; }).catch(() => {});
   startRecognizer();
 }
@@ -349,7 +504,7 @@ function startRecognizer() {
   };
   recognition.onerror = (e) => {
     if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-      toast("麦克风权限被拒绝，请在浏览器设置中允许");
+      toast("麦克风权限被拒绝：请在 设置 → Safari → 麦克风 中允许");
       stopListening();
     } else if (e.error !== "no-speech" && e.error !== "aborted") {
       setStatus(`识别错误：${e.error}，正在重连…`);
@@ -396,7 +551,6 @@ function exportMarkdown() {
     ``,
     `- 开始时间：${new Date(session.startedAt).toLocaleString()}`,
     `- 语言：${langName(settings.srcLang)} → ${langName(settings.tgtLang)}`,
-    `- 模型：${settings.model}`,
     ``,
   ];
   if (session.summary) lines.push(`## 总结`, ``, session.summary, ``);
@@ -413,37 +567,125 @@ function exportMarkdown() {
 }
 
 // ---------- Settings ----------
+function buildProviderCards() {
+  els.providerList.replaceChildren();
+  for (const id of PROVIDER_IDS) {
+    const def = PROVIDERS[id];
+    const cfg = providerCfg(id);
+    const fs = document.createElement("fieldset");
+    fs.className = "prov";
+    fs.dataset.id = id;
+    fs.innerHTML = `
+      <legend></legend>
+      <input class="key" type="password" autocomplete="off" placeholder="API Key">
+      <input class="model" type="text" autocomplete="off" list="models-${id}">
+      <datalist id="models-${id}"></datalist>
+      <details>
+        <summary>高级：接口地址 / 中转</summary>
+        <input class="base" type="url" autocomplete="off">
+        <small class="hint base-hint"></small>
+        <label class="check"><input class="relay" type="checkbox"> 通过中转</label>
+      </details>
+      <div class="test-row"><button type="button" class="test">测试连接</button><span class="test-result"></span></div>`;
+    const legend = fs.querySelector("legend");
+    legend.textContent = def.name;
+    const link = document.createElement("a");
+    link.href = def.keyUrl; link.target = "_blank"; link.rel = "noopener"; link.textContent = "获取 Key";
+    legend.append(link);
+    fs.querySelector(".key").value = cfg.apiKey;
+    const model = fs.querySelector(".model");
+    model.value = cfg.model;
+    model.placeholder = def.defaultModel ? `模型（默认 ${def.defaultModel}）` : (def.modelHint || "模型名");
+    for (const m of def.models) fs.querySelector("datalist").append(new Option(m, m));
+    const base = fs.querySelector(".base");
+    base.value = cfg.baseURL;
+    base.placeholder = def.baseURL;
+    fs.querySelector(".base-hint").textContent = def.baseHint || "";
+    fs.querySelector(".relay").checked = cfg.useRelay;
+    fs.querySelector(".test").addEventListener("click", () => testProvider(id, fs));
+    els.providerList.append(fs);
+  }
+  markActiveProviders();
+}
+
+function markActiveProviders() {
+  for (const fs of els.providerList.children) {
+    const id = fs.dataset.id;
+    fs.classList.toggle("active", id === els.translateWith.value || id === els.summarizeWith.value);
+  }
+}
+
+function readProviderCard(fs) {
+  return {
+    apiKey: fs.querySelector(".key").value.trim(),
+    model: fs.querySelector(".model").value.trim(),
+    baseURL: fs.querySelector(".base").value.trim(),
+    useRelay: fs.querySelector(".relay").checked,
+  };
+}
+
+async function testProvider(id, fs) {
+  const out = fs.querySelector(".test-result");
+  const btn = fs.querySelector(".test");
+  out.className = "test-result";
+  out.textContent = "测试中…";
+  btn.disabled = true;
+  const prevRelay = settings.relayUrl;
+  settings.relayUrl = els.relayUrl.value.trim(); // test with the relay currently typed in
+  try {
+    const text = await complete(id, {
+      system: "You are a translator. Output only the translation.",
+      user: "Translate into Chinese: Good morning, everyone.",
+      maxTokens: 50,
+      effort: "low",
+    }, readProviderCard(fs));
+    out.className = "test-result ok";
+    out.textContent = `可用 ✓ ${text.slice(0, 30)}`;
+  } catch (err) {
+    out.className = "test-result bad";
+    out.textContent = describeError(err);
+  } finally {
+    settings.relayUrl = prevRelay;
+    btn.disabled = false;
+  }
+}
+
 function openSettings() {
-  els.apiKey.value = settings.apiKey;
-  els.password.value = settings.password;
-  els.model.value = settings.model;
+  els.translateWith.value = settings.translateWith;
+  els.summarizeWith.value = settings.summarizeWith;
+  els.relayUrl.value = settings.relayUrl;
   els.topic.value = settings.topic;
   els.tts.checked = settings.tts;
   els.autoSummary.checked = settings.autoSummary;
-  els.keyRow.hidden = proxy.enabled;
-  els.proxyNote.hidden = !proxy.enabled;
-  els.pwRow.hidden = !proxy.passwordRequired;
+  buildProviderCards();
   els.settingsDlg.showModal();
 }
 
+els.translateWith.addEventListener("change", markActiveProviders);
+els.summarizeWith.addEventListener("change", markActiveProviders);
+
 els.settingsDlg.addEventListener("close", () => {
   if (els.settingsDlg.returnValue !== "save") return;
+  const providers = {};
+  for (const fs of els.providerList.children) providers[fs.dataset.id] = readProviderCard(fs);
   Object.assign(settings, {
-    apiKey: els.apiKey.value.trim(),
-    password: els.password.value,
-    model: els.model.value,
+    translateWith: els.translateWith.value,
+    summarizeWith: els.summarizeWith.value,
+    relayUrl: els.relayUrl.value.trim(),
     topic: els.topic.value.trim(),
     tts: els.tts.checked,
     autoSummary: els.autoSummary.checked,
+    providers,
   });
   saveSettings();
-  toast("设置已保存");
+  toast(`已保存 · 翻译：${PROVIDERS[settings.translateWith].name} · 总结：${PROVIDERS[settings.summarizeWith].name}`);
 });
 
 // ---------- Wiring ----------
 function switchTab(name) {
   document.querySelectorAll(".tabs [data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === name));
+  if (name === "history") renderHistory();
 }
 document.querySelectorAll(".tabs [data-tab]").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
 
@@ -471,21 +713,19 @@ els.summarizeBtn.addEventListener("click", summarize);
 els.exportBtn.addEventListener("click", exportMarkdown);
 els.settingsBtn.addEventListener("click", openSettings);
 els.newBtn.addEventListener("click", () => {
-  if (session.segments.length && !confirm("开始新会话？当前记录将被清空（可先导出）。")) return;
   if (listening) stopListening();
+  if (session.segments.length) { saveSession(); toast("上一场会议已保存到「历史」"); }
   session = newSession();
-  saveSession();
   renderAll();
   switchTab("live");
 });
 els.typeForm.addEventListener("submit", (e) => {
   e.preventDefault();
-  if (needsSetup()) { openSettings(); return; }
+  if (keyMissing(settings.translateWith)) { openSettings(); return; }
   addSegment(els.typeInput.value);
   els.typeInput.value = "";
 });
 
 renderAll();
-await detectProxy();
 if (!SR) setStatus("此浏览器不支持语音识别，可输入文字翻译");
-if (needsSetup()) openSettings();
+if (keyMissing(settings.translateWith)) openSettings();
